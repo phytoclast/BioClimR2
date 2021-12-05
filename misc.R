@@ -190,6 +190,9 @@ Biomeclimate$Tclx <- XtremLow(Biomeclimate$Tcl, Biomeclimate$Latitude, Biomeclim
 saveRDS(Biomeclimate, 'data/RadBiomeclimate.RDS')
 
 
+#####
+Biomeclimate <- readRDS( 'data/RadBiomeclimate.RDS')
+
 
 
 unique(Biomeclimate[,c('BIOME', 'biomname')])
@@ -201,17 +204,82 @@ Biomeclimate$MAAT <- apply(Biomeclimate[,which(colnames(Biomeclimate)=='t01'):wh
 
 Biomeclimate$M <- (Biomeclimate$MAP/Biomeclimate$PET +0.0001)
 Biomeclimate$Cindex <- pmin(Biomeclimate$Tc,Biomeclimate$Tclx+15)
-Biomeclimate$Deficit <- pmin(200, Biomeclimate$Deficit)
-Biomeclimate$Surplus <- pmin(200, Biomeclimate$Surplus)
+#Biomeclimate$Deficit <- pmin(200, Biomeclimate$Deficit)
+#Biomeclimate$Surplus <- pmin(200, Biomeclimate$Surplus)
+corep <- function(x){
+  e=x[1:12]
+  p=x[13:24]
+  cor(e,p)
+}
+Biomeclimate$corep <- apply(Biomeclimate[,c(e.,p.)], 1, corep)
+fp3aet <- function(x){
+  qmon = c(11,12,1,2,3,4,5,6,7,8,9,10,11,12)
+  e=x[1:12]
+  p=x[13:24]
+  a = c(1:12)*0
+  for(i in 1:12){
+    a[i] = min(e[qmon[i]],p[qmon[i]])+
+      min(e[qmon[i+1]],p[qmon[i+1]])+
+      min(e[qmon[i+2]],p[qmon[i+2]])
+  }
+  p3aet = max(a)
+  return(p3aet)
+}
+Biomeclimate$p3aet <- apply(Biomeclimate[,c(e.,p.)], 1, fp3aet)
+
+
+
+selectBiome<-subset(Biomeclimate, !is.na(corep))
+selectBiome$biom2 <- 'not'
+selectBiome$biom2 <- ifelse(selectBiome$Tg <12, 'boreal',
+                            ifelse(selectBiome$Cindex >= 15, 'tropical',
+                                   ifelse(selectBiome$Deficit < 150 & selectBiome$M >= 1, 'isopluvial',
+                                          ifelse(selectBiome$Surplus < 25 & selectBiome$M < 0.5, 'isoxeric',
+                                                 ifelse(selectBiome$corep < 0, 'xerothermic','pluviothermic')))))
+# selectBiome$biom2 <- ifelse(selectBiome$BIOME %in% c(1,3,5,6), 'tree',
+#                             ifelse(selectBiome$BIOME %in% c(2,4), 'tree',
+#                                    ifelse(selectBiome$BIOME %in% c(12), 'shrub',
+#                                           ifelse(selectBiome$BIOME %in% c(7,8), 'grass',
+#                                                  ifelse(selectBiome$BIOME %in% c(13), 'desert',
+#                                                         ifelse(selectBiome$BIOME %in% c(10,11), 'tundra',
+#                                                  'not'))))))
+# 
+# selectBiome <-  subset(selectBiome, !biom2 %in% 'not' & Tg > 12 & Cindex < 15 & Cindex > 0 & biom2 %in% c('grass','shrub'))
+selectBiomecount<-aggregate(selectBiome$ECO_NAME, by=list(selectBiome$biom2),FUN=length)
+colnames(selectBiomecount)<-c("biom2","x")
+selectBiomecount$wt <- 1/(selectBiomecount$x+1)
+selectBiome<-merge(selectBiome,selectBiomecount, by="biom2")
+colnames(selectBiome)
+
+biomeclass <- rpart(biom2 ~  p3aet + Tg + Cindex +  M + Deficit + Surplus, 
+                    data = selectBiome,weights=selectBiome$wt, method="class", 
+                    control = list(maxdepth = 5, cp=0.0005, minsplit=100))
+# Make plot
+biomeclass
+png(filename="biome2class.png",width = 10, height = 3, units = 'in', res = 600)
+
+rpart.plot(biomeclass, extra=108) # Make plot
+
+dev.off()
+
+
+
+
 selectBiome<-subset(Biomeclimate, BIOME %in% c(1,2,4,5,6,7,8,10,11,12,13))
 
+selectBiome<-subset(Biomeclimate, BIOME %in% c(7,12,13))
+selectBiome <- subset(selectBiome, !is.na(corep))
 selectBiomecount<-aggregate(selectBiome$ECO_NAME, by=list(selectBiome$biomname),FUN=length)
 colnames(selectBiomecount)<-c("biomname","x")
 selectBiomecount$wt <- 1/(selectBiomecount$x+1)
 selectBiome<-merge(selectBiome,selectBiomecount, by="biomname")
 colnames(selectBiome)
+selectBiome$corep
+biomeclass <- rpart(biomname ~  p3aet + Tg + Cindex +  M + Deficit + Surplus + pAET +corep, data = selectBiome,weights=selectBiome$wt, method="class", control = list(maxdepth = 2, cp=0.0005, minsplit=100))
+# Make plot
+biomeclass
 
-biomeclass <- rpart(biomname ~  Tg + Cindex +  M + Deficit + Surplus + pAET, data = selectBiome,weights=selectBiome$wt, method="class", control = list(maxdepth = 5, cp=0.0005, minsplit=100))
+biomeclass <- rpart(biomname ~  p3aet + Tg + Cindex +  M + Deficit + Surplus + pAET, data = selectBiome,weights=selectBiome$wt, method="class", control = list(maxdepth = 5, cp=0.0005, minsplit=100))
 # Make plot
 
 png(filename="biomeclass.png",width = 10, height = 3, units = 'in', res = 600)
@@ -221,6 +289,12 @@ rpart.plot(biomeclass, extra=108) # Make plot
 dev.off()
 
 
+
+t. = grep("^t01$", colnames(Biomeclimate)):grep("^t12$", colnames(Biomeclimate))
+th. = grep("^th01$", colnames(Biomeclimate)):grep("^th12$", colnames(Biomeclimate))
+tl. = grep("^tl01$", colnames(Biomeclimate)):grep("^tl12$", colnames(Biomeclimate))
+p. = grep("^p01$", colnames(Biomeclimate)):grep("^p12$", colnames(Biomeclimate))
+e. = grep("^e01$", colnames(Biomeclimate)):grep("^e12$", colnames(Biomeclimate))
 
 
 
